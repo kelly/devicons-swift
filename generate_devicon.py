@@ -1,14 +1,19 @@
 import json
 import os
-import urllib.request
-import re
-import concurrent.futures
-import sys
 import shutil
+import urllib.request
+import zipfile
+import re
+import sys
 
-# Set to True to download all icons, False to download a subset (for sandbox environment)
-DOWNLOAD_ALL = False
-SUBSET_LIMIT = 5
+# Set to True to generate all icons, False to generate a subset (for sandbox environment)
+GENERATE_ALL = False
+# Limit for ASSET generation (file copying)
+SUBSET_LIMIT = 10
+
+REPO_ZIP_URL = "https://github.com/devicons/devicon/archive/refs/heads/master.zip"
+TEMP_DIR = "/tmp/devicon_work"
+ICONS_DIR = os.path.join(TEMP_DIR, "devicon-master", "icons")
 
 def sanitize_name(name):
     name = re.sub(r'[^a-zA-Z0-9_]', '_', name)
@@ -26,28 +31,17 @@ def sanitize_name(name):
         return f"_{name}"
     return name
 
-def download_file(url, filepath):
-    try:
-        urllib.request.urlretrieve(url, filepath)
-        return True
-    except Exception as e:
-        print(f"Failed to download {url}: {e}")
-        return False
-
 def create_imageset(xcassets_dir, name, filename, source_filepath):
     imageset_dir = os.path.join(xcassets_dir, f"{name}.imageset")
     os.makedirs(imageset_dir, exist_ok=True)
     
-    # Move/Copy the file to imageset
-    dest_filename = filename
-    dest_filepath = os.path.join(imageset_dir, dest_filename)
+    dest_filepath = os.path.join(imageset_dir, filename)
     shutil.copy(source_filepath, dest_filepath)
     
-    # Create Contents.json
     contents = {
         "images": [
             {
-                "filename": dest_filename,
+                "filename": filename,
                 "idiom": "universal"
             }
         ],
@@ -64,40 +58,44 @@ def create_imageset(xcassets_dir, name, filename, source_filepath):
         json.dump(contents, f, indent=2)
 
 def main():
-    global DOWNLOAD_ALL
+    global GENERATE_ALL
     if len(sys.argv) > 1 and sys.argv[1] == "--all":
-        DOWNLOAD_ALL = True
-        print("Downloading ALL icons...")
+        GENERATE_ALL = True
+        print("Generating ALL icons...")
     else:
-        print(f"Downloading subset of {SUBSET_LIMIT} icons...")
-    
-    with open('devicon.json', 'r') as f:
-        icons = json.load(f)
+        print(f"Generating subset of assets (limit {SUBSET_LIMIT}) but ALL code...")
 
-    # Clean up previous resources
+    extension_icon_map = {}
+    if os.path.exists("extension_icon_map.json"):
+        with open("extension_icon_map.json", "r") as f:
+            extension_icon_map = json.load(f)
+
+    if os.path.exists(TEMP_DIR):
+        shutil.rmtree(TEMP_DIR)
+    os.makedirs(TEMP_DIR, exist_ok=True)
+
+    zip_path = os.path.join(TEMP_DIR, "repo.zip")
+    print(f"Downloading {REPO_ZIP_URL}...")
+    urllib.request.urlretrieve(REPO_ZIP_URL, zip_path)
+
+    print("Extracting...")
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(TEMP_DIR)
+
+    if not os.path.exists(ICONS_DIR):
+        print(f"Error: Icons directory not found at {ICONS_DIR}")
+        return
+
     base_resources_dir = "Sources/Devicon/Resources"
     if os.path.exists(base_resources_dir):
         shutil.rmtree(base_resources_dir)
     os.makedirs(base_resources_dir, exist_ok=True)
 
-    # Temporary download directory
-    temp_dir = "temp_downloads"
-    if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir)
-    os.makedirs(temp_dir, exist_ok=True)
-
-    # Create Assets.xcassets
     xcassets_dir = os.path.join(base_resources_dir, "Assets.xcassets")
     os.makedirs(xcassets_dir, exist_ok=True)
     
-    # Create top-level Contents.json for .xcassets
     with open(os.path.join(xcassets_dir, "Contents.json"), "w") as f:
-        json.dump({
-            "info": {
-                "author": "xcode",
-                "version": 1
-            }
-        }, f, indent=2)
+        json.dump({"info": {"author": "xcode", "version": 1}}, f, indent=2)
 
     swift_code = []
     swift_code.append("import Foundation")
@@ -110,76 +108,73 @@ def main():
     swift_code.append("public typealias DeviconImage = NSImage")
     swift_code.append("#endif")
     swift_code.append("")
+    swift_code.append("public enum DeviconType: String {")
+    swift_code.append("    case original")
+    swift_code.append("    case plain")
+    swift_code.append("    case line")
+    swift_code.append("    case originalWordmark = \"original-wordmark\"")
+    swift_code.append("    case plainWordmark = \"plain-wordmark\"")
+    swift_code.append("    case lineWordmark = \"line-wordmark\"")
+    swift_code.append("}")
+    swift_code.append("")
     swift_code.append("public struct Devicon {")
 
-    tasks = []
     properties = set()
-    download_count = 0
     
-    # To avoid race conditions with adding to swift code or creating imagesets, 
-    # we will first determine what to download, download them, and then generate code/assets.
-    
-    icons_to_process = [] # List of (name, version, url, filename, prop_name)
+    priority_icons = ["adonisjs", "aarch64", "javascript", "python", "swift", "html5", "css3"]
+    icon_dirs = sorted([d for d in os.listdir(ICONS_DIR) if os.path.isdir(os.path.join(ICONS_DIR, d))])
+    sorted_dirs = sorted(icon_dirs, key=lambda x: (0 if x in priority_icons else 1, x))
 
-    for icon in icons:
-        name = icon['name']
-        versions = icon['versions'].get('svg', [])
-        
-        for version in versions:
-            url = f"https://raw.githubusercontent.com/devicons/devicon/master/icons/{name}/{name}-{version}.svg"
-            filename = f"{name}-{version}.svg"
+    asset_count = 0
+    available_icons = set()
+
+    for icon_name in sorted_dirs:
+        icon_path = os.path.join(ICONS_DIR, icon_name)
+        svgs = [f for f in os.listdir(icon_path) if f.endswith(".svg")]
+
+        if not svgs:
+            continue
+
+        available_icons.add(icon_name)
+
+        should_generate_assets = GENERATE_ALL or (asset_count < SUBSET_LIMIT)
+        if should_generate_assets:
+            asset_count += 1
+
+        for svg_filename in svgs:
+            base_name = os.path.splitext(svg_filename)[0]
+            prop_name = sanitize_name(base_name.replace("-", "_"))
             
-            if DOWNLOAD_ALL or download_count < SUBSET_LIMIT:
-                prop_name = sanitize_name(f"{name}_{version}")
-                icons_to_process.append({
-                    "name": name,
-                    "version": version,
-                    "url": url,
-                    "filename": filename,
-                    "prop_name": prop_name,
-                    "original_icon_data": icon
-                })
-                download_count += 1
+            # Generate Code
+            if prop_name not in properties:
+                properties.add(prop_name)
+                # Keep existing static properties for convenience
+                swift_code.append(f"    public static var {prop_name}: DeviconImage {{ return bundleImage(named: \"{base_name}\") }}")
 
-    # Download
-    print(f"Starting download of {len(icons_to_process)} files...")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_icon = {}
-        for item in icons_to_process:
-            filepath = os.path.join(temp_dir, item['filename'])
-            future = executor.submit(download_file, item['url'], filepath)
-            future_to_icon[future] = item
-            
-        for future in concurrent.futures.as_completed(future_to_icon):
-            item = future_to_icon[future]
-            success = future.result()
-            if success:
-                # Create Image Set
-                filepath = os.path.join(temp_dir, item['filename'])
-                asset_name = f"{item['name']}-{item['version']}"
-                create_imageset(xcassets_dir, asset_name, item['filename'], filepath)
-                
-                # Add Swift property
-                prop_name = item['prop_name']
-                if prop_name not in properties:
-                    properties.add(prop_name)
-                    swift_code.append(f"    public static var {prop_name}: DeviconImage {{ return bundleImage(named: \"{asset_name}\") }}")
-                
-                # Add Aliases (only if base property exists)
-                aliases = item['original_icon_data'].get('aliases', [])
-                for alias in aliases:
-                    base = alias['base']
-                    alias_name = alias['alias']
-                    
-                    # We check if this specific version corresponds to the alias base
-                    if base == item['version']:
-                         alias_prop = sanitize_name(f"{item['name']}_{alias_name}")
-                         base_prop = prop_name
-                         
-                         if alias_prop not in properties:
-                            properties.add(alias_prop)
-                            swift_code.append(f"    public static var {alias_prop}: DeviconImage {{ return {base_prop} }}")
+            if should_generate_assets:
+                create_imageset(xcassets_dir, base_name, svg_filename, os.path.join(icon_path, svg_filename))
 
+    # Generate helper to get icon name for extension
+    swift_code.append("")
+    swift_code.append("    public static func iconName(for extension: String) -> String? {")
+    swift_code.append("        let normalizedExt = `extension`.lowercased()")
+    swift_code.append("        switch normalizedExt {")
+
+    # We rely on the extension map to map ext -> icon_name (directory name)
+    for ext, icon_name in sorted(extension_icon_map.items()):
+        if icon_name in available_icons:
+            swift_code.append(f"        case \"{ext}\": return \"{icon_name}\"")
+
+    swift_code.append("        default: return nil")
+    swift_code.append("        }")
+    swift_code.append("    }")
+
+    # Generate forExtension with type
+    swift_code.append("")
+    swift_code.append("    public static func forExtension(_ ext: String, style: DeviconType = .plain) -> DeviconImage? {")
+    swift_code.append("        guard let name = iconName(for: ext) else { return nil }")
+    swift_code.append("        return bundleImage(named: \"\\(name)-\\(style.rawValue)\")")
+    swift_code.append("    }")
 
     swift_code.append("}")
     swift_code.append("")
@@ -194,10 +189,10 @@ def main():
     with open("Sources/Devicon/Devicon.swift", "w") as f:
         f.write("\n".join(swift_code))
         
-    # Clean temp dir
-    shutil.rmtree(temp_dir)
+    if os.path.exists(TEMP_DIR):
+        shutil.rmtree(TEMP_DIR)
 
-    print(f"Done. Downloaded and processed {download_count} resources.")
+    print(f"Done. Processed {len(sorted_dirs)} icons for code. Generated assets for {asset_count} icons.")
 
 if __name__ == "__main__":
     main()
