@@ -74,6 +74,14 @@ def main():
     with open('devicon.json', 'r') as f:
         icons = json.load(f)
 
+    # Load extension map
+    extension_icon_map = {}
+    if os.path.exists("extension_icon_map.json"):
+        with open("extension_icon_map.json", "r") as f:
+            extension_icon_map = json.load(f)
+    else:
+        print("Warning: extension_icon_map.json not found. Extension mapping will be empty.")
+
     # Clean up previous resources
     base_resources_dir = "Sources/Devicon/Resources"
     if os.path.exists(base_resources_dir):
@@ -112,14 +120,20 @@ def main():
     swift_code.append("")
     swift_code.append("public struct Devicon {")
 
-    tasks = []
     properties = set()
     download_count = 0
     
-    # To avoid race conditions with adding to swift code or creating imagesets, 
-    # we will first determine what to download, download them, and then generate code/assets.
-    
     icons_to_process = [] # List of (name, version, url, filename, prop_name)
+
+    # Map to track available properties for each icon name to use in switch statement
+    # icon_name -> set of available swift properties (e.g. 'javascript' -> {'javascript_original', 'javascript_plain'})
+    available_icon_properties = {}
+
+    # Prioritize some common languages for the subset to verify mapping logic
+    priority_icons = ["javascript", "python", "swift", "html5", "css3"]
+
+    # Sort icons to put priority ones first
+    icons.sort(key=lambda x: (0 if x['name'] in priority_icons else 1, x['name']))
 
     for icon in icons:
         name = icon['name']
@@ -140,6 +154,10 @@ def main():
                     "original_icon_data": icon
                 })
                 download_count += 1
+
+                if name not in available_icon_properties:
+                    available_icon_properties[name] = set()
+                available_icon_properties[name].add(prop_name)
 
     # Download
     print(f"Starting download of {len(icons_to_process)} files...")
@@ -180,6 +198,53 @@ def main():
                             properties.add(alias_prop)
                             swift_code.append(f"    public static var {alias_prop}: DeviconImage {{ return {base_prop} }}")
 
+                            if item['name'] not in available_icon_properties:
+                                available_icon_properties[item['name']] = set()
+                            available_icon_properties[item['name']].add(alias_prop)
+
+    # Generate forExtension method
+    swift_code.append("")
+    swift_code.append("    public static func forExtension(_ ext: String) -> DeviconImage? {")
+    swift_code.append("        let normalizedExt = ext.lowercased()")
+    swift_code.append("        switch normalizedExt {")
+
+    # Helper to pick best property for an icon name
+    def get_best_property(icon_name):
+        props = available_icon_properties.get(icon_name, set())
+        if not props:
+            return None
+
+        # Priority: original > plain > line > others
+        # We also need to construct the property name. available_icon_properties stores the swift property name.
+
+        candidates = list(props)
+        # Try to find one ending in _original
+        for p in candidates:
+            if p.endswith("_original"):
+                return p
+        for p in candidates:
+            if p.endswith("_plain"):
+                return p
+        for p in candidates:
+             if p.endswith("_line"):
+                 return p
+
+        # Fallback to any
+        return candidates[0] if candidates else None
+
+    # Sort items for stable output
+    for ext, icon_name in sorted(extension_icon_map.items()):
+        # Only add case if we actually have the icon downloaded (or if we are downloading all)
+        # If we are doing subset, we might have mapped it but not downloaded it.
+        # But 'available_icon_properties' only contains downloaded ones.
+
+        best_prop = get_best_property(icon_name)
+        if best_prop:
+             swift_code.append(f"        case \"{ext}\": return {best_prop}")
+
+    swift_code.append("        default: return nil")
+    swift_code.append("        }")
+    swift_code.append("    }")
 
     swift_code.append("}")
     swift_code.append("")

@@ -9,16 +9,25 @@ public typealias DeviconImage = NSImage
 #endif
 
 public struct Devicon {
-    public static var adonisjs_original: DeviconImage { return bundleImage(named: "adonisjs-original") }
-    public static var adonisjs_plain: DeviconImage { return adonisjs_original }
-    public static var aarch64_plain: DeviconImage { return bundleImage(named: "aarch64-plain") }
-    public static var aarch64_plain_wordmark: DeviconImage { return aarch64_plain }
-    public static var aarch64_original: DeviconImage { return bundleImage(named: "aarch64-original") }
-    public static var aarch64_original_wordmark: DeviconImage { return aarch64_original }
-    public static var adonisjs_original_wordmark: DeviconImage { return bundleImage(named: "adonisjs-original-wordmark") }
-    public static var adonisjs_plain_wordmark: DeviconImage { return adonisjs_original_wordmark }
-    public static var aarch64_line: DeviconImage { return bundleImage(named: "aarch64-line") }
-    public static var aarch64_line_wordmark: DeviconImage { return aarch64_line }
+    public static var css3_plain_wordmark: DeviconImage { return bundleImage(named: "css3-plain-wordmark") }
+    public static var css3_original_wordmark: DeviconImage { return bundleImage(named: "css3-original-wordmark") }
+    public static var html5_original: DeviconImage { return bundleImage(named: "html5-original") }
+    public static var css3_original: DeviconImage { return bundleImage(named: "css3-original") }
+    public static var css3_plain: DeviconImage { return bundleImage(named: "css3-plain") }
+
+    public static func forExtension(_ ext: String) -> DeviconImage? {
+        let normalizedExt = ext.lowercased()
+        switch normalizedExt {
+        case ".css": return css3_original
+        case ".hta": return html5_original
+        case ".htm": return html5_original
+        case ".html": return html5_original
+        case ".html.hl": return html5_original
+        case ".xht": return html5_original
+        case ".xhtml": return html5_original
+        default: return nil
+        }
+    }
 }
 
 private func bundleImage(named name: String) -> DeviconImage {
