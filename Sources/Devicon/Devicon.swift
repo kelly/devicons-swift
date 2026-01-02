@@ -2391,7 +2391,17 @@ public struct Devicon {
 
     public static func forExtension(_ ext: String, style: DeviconType = .plain) -> DeviconImage? {
         guard let name = iconName(for: ext) else { return nil }
-        return bundleImage(named: "\(name)-\(style.rawValue)")
+        var image = bundleImage(named: "\(name)-\(style.rawValue)")
+
+        if image.size == .zero && style == .plain {
+            image = bundleImage(named: "\(name)-\(DeviconType.original.rawValue)")
+        }
+
+        if image.size == .zero {
+            return nil
+        }
+
+        return image
     }
 }
 
