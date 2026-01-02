@@ -7,7 +7,7 @@ import re
 import sys
 
 # Set to True to generate all icons, False to generate a subset (for sandbox environment)
-GENERATE_ALL = False
+GENERATE_ALL = True
 # Limit for ASSET generation (file copying)
 SUBSET_LIMIT = 10
 
