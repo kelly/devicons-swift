@@ -6,9 +6,9 @@ import zipfile
 import re
 import sys
 
-# Set to True to generate all icons, False to generate a subset (for sandbox environment)
-GENERATE_ALL = False
-# Limit for ASSET generation (file copying)
+# Default to generating ALL icons
+GENERATE_ALL = True
+# Limit for ASSET generation (file copying) if GENERATE_ALL is False
 SUBSET_LIMIT = 10
 
 REPO_ZIP_URL = "https://github.com/devicons/devicon/archive/refs/heads/master.zip"
@@ -64,11 +64,14 @@ def main():
     batch_size = 999999
     no_clean = False
 
+    # Parse arguments
     args = sys.argv[1:]
     while args:
         arg = args.pop(0)
         if arg == "--all":
             GENERATE_ALL = True
+        elif arg == "--subset":
+            GENERATE_ALL = False
         elif arg == "--batch-start":
             batch_start = int(args.pop(0))
         elif arg == "--batch-size":
