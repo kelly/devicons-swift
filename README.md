@@ -56,6 +56,28 @@ struct ContentView: View {
 }
 ```
 
+### Usage by File Extension
+
+You can get an icon for a file extension using the `forExtension` function.
+
+```swift
+import Devicon
+
+// Get the plain swift icon
+let image = Devicon.forExtension(".swift")
+
+// Get the original swift icon
+let originalImage = Devicon.forExtension(".swift", style: .original)
+```
+
+The `style` parameter is optional and defaults to `.plain`. The available styles are:
+- `.original`
+- `.plain`
+- `.line`
+- `.originalWordmark`
+- `.plainWordmark`
+- `.lineWordmark`
+
 ## Updating Icons
 
 To update the icons or fetch all of them (the repository currently contains a subset to be lightweight):
