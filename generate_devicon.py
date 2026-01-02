@@ -59,11 +59,31 @@ def create_imageset(xcassets_dir, name, filename, source_filepath):
 
 def main():
     global GENERATE_ALL
-    if len(sys.argv) > 1 and sys.argv[1] == "--all":
-        GENERATE_ALL = True
-        print("Generating ALL icons...")
+
+    batch_start = 0
+    batch_size = 999999
+    no_clean = False
+
+    args = sys.argv[1:]
+    while args:
+        arg = args.pop(0)
+        if arg == "--all":
+            GENERATE_ALL = True
+        elif arg == "--batch-start":
+            batch_start = int(args.pop(0))
+        elif arg == "--batch-size":
+            batch_size = int(args.pop(0))
+        elif arg == "--no-clean":
+            no_clean = True
+
+    if GENERATE_ALL:
+        print("Generating ALL icons (with batching if specified)...")
     else:
-        print(f"Generating subset of assets (limit {SUBSET_LIMIT}) but ALL code...")
+        # If batch params are provided, we assume we want to generate assets for that batch
+        # effectively doing "ALL" in steps if iterated.
+        pass
+
+    print(f"Batch start: {batch_start}, Batch size: {batch_size}, No clean: {no_clean}")
 
     extension_icon_map = {}
     if os.path.exists("extension_icon_map.json"):
@@ -87,15 +107,18 @@ def main():
         return
 
     base_resources_dir = "Sources/Devicon/Resources"
-    if os.path.exists(base_resources_dir):
-        shutil.rmtree(base_resources_dir)
-    os.makedirs(base_resources_dir, exist_ok=True)
-
     xcassets_dir = os.path.join(base_resources_dir, "Assets.xcassets")
-    os.makedirs(xcassets_dir, exist_ok=True)
     
-    with open(os.path.join(xcassets_dir, "Contents.json"), "w") as f:
-        json.dump({"info": {"author": "xcode", "version": 1}}, f, indent=2)
+    if not no_clean:
+        if os.path.exists(base_resources_dir):
+            shutil.rmtree(base_resources_dir)
+        os.makedirs(base_resources_dir, exist_ok=True)
+        os.makedirs(xcassets_dir, exist_ok=True)
+        with open(os.path.join(xcassets_dir, "Contents.json"), "w") as f:
+            json.dump({"info": {"author": "xcode", "version": 1}}, f, indent=2)
+    else:
+        if not os.path.exists(xcassets_dir):
+             os.makedirs(xcassets_dir, exist_ok=True)
 
     swift_code = []
     swift_code.append("import Foundation")
@@ -122,30 +145,50 @@ def main():
     properties = set()
     
     priority_icons = ["adonisjs", "aarch64", "javascript", "python", "swift", "html5", "css3"]
+    # We need to filter and sort same way
     icon_dirs = sorted([d for d in os.listdir(ICONS_DIR) if os.path.isdir(os.path.join(ICONS_DIR, d))])
     sorted_dirs = sorted(icon_dirs, key=lambda x: (0 if x in priority_icons else 1, x))
 
     asset_count = 0
     available_icons = set()
 
+    # Pre-calculate valid icons to handle indices consistently
+    valid_icons = []
     for icon_name in sorted_dirs:
+        icon_path = os.path.join(ICONS_DIR, icon_name)
+        # Check if there are any svgs
+        if any(f.endswith(".svg") for f in os.listdir(icon_path)):
+            valid_icons.append(icon_name)
+
+    processed_index = 0
+
+    for icon_name in valid_icons:
         icon_path = os.path.join(ICONS_DIR, icon_name)
         svgs = [f for f in os.listdir(icon_path) if f.endswith(".svg")]
 
-        if not svgs:
-            continue
-
         available_icons.add(icon_name)
 
-        should_generate_assets = GENERATE_ALL or (asset_count < SUBSET_LIMIT)
+        # Determine if we should generate assets for this icon based on batch
+        in_batch = (processed_index >= batch_start) and (processed_index < batch_start + batch_size)
+
+        # If batch args are provided (size != default or start != default), use batch logic.
+        # Otherwise fall back to GENERATE_ALL vs SUBSET_LIMIT
+        should_generate_assets = False
+        if batch_size != 999999 or batch_start != 0:
+             should_generate_assets = in_batch
+        else:
+             should_generate_assets = GENERATE_ALL or (asset_count < SUBSET_LIMIT)
+
         if should_generate_assets:
             asset_count += 1
+
+        processed_index += 1
 
         for svg_filename in svgs:
             base_name = os.path.splitext(svg_filename)[0]
             prop_name = sanitize_name(base_name.replace("-", "_"))
             
-            # Generate Code
+            # Generate Code (always generate code for all valid icons to keep Devicon.swift consistent)
             if prop_name not in properties:
                 properties.add(prop_name)
                 # Keep existing static properties for convenience
@@ -192,7 +235,7 @@ def main():
     if os.path.exists(TEMP_DIR):
         shutil.rmtree(TEMP_DIR)
 
-    print(f"Done. Processed {len(sorted_dirs)} icons for code. Generated assets for {asset_count} icons.")
+    print(f"Done. Processed {len(valid_icons)} valid icons for code. Generated assets for {asset_count} icons.")
 
 if __name__ == "__main__":
     main()
