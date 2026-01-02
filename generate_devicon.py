@@ -8,7 +8,7 @@ import shutil
 
 # Set to True to download all icons, False to download a subset (for sandbox environment)
 DOWNLOAD_ALL = False
-SUBSET_LIMIT = 5
+SUBSET_LIMIT = 30
 
 def sanitize_name(name):
     name = re.sub(r'[^a-zA-Z0-9_]', '_', name)
@@ -130,7 +130,8 @@ def main():
     available_icon_properties = {}
 
     # Prioritize some common languages for the subset to verify mapping logic
-    priority_icons = ["javascript", "python", "swift", "html5", "css3"]
+    # Also include originally present icons to avoid regression in the sample
+    priority_icons = ["adonisjs", "aarch64", "javascript", "python", "swift", "html5", "css3"]
 
     # Sort icons to put priority ones first
     icons.sort(key=lambda x: (0 if x['name'] in priority_icons else 1, x['name']))
